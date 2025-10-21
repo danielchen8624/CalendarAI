@@ -11,14 +11,15 @@ export const authOptions: NextAuthOptions = {
           // include Calendar-ready scopes now so you don’t have to re-consent later
           scope:
             "openid email profile https://www.googleapis.com/auth/calendar.readonly",
-          prompt: "consent",        // forces refresh_token on each consent
-          access_type: "offline",   // needed for refresh_token
+          prompt: "consent", // forces refresh_token on each consent
+          access_type: "offline", // needed for refresh_token
           response_type: "code",
         },
       },
+      httpOptions: { timeout: 15000 },
     }),
   ],
-  session: { strategy: "jwt" },     // simple to start; no DB adapter needed yet
+  session: { strategy: "jwt" }, // simple to start; no DB adapter needed yet
   secret: process.env.NEXTAUTH_SECRET,
   callbacks: {
     async jwt({ token, account, profile }) {
