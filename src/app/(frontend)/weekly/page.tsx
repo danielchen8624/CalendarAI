@@ -1,6 +1,11 @@
 import React from "react";
 import Link from "next/link";
-export default function TodayPage() {
+
+
+
+
+
+export default function WeeklyPage() {
   const weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
   return (

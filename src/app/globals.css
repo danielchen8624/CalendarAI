@@ -158,3 +158,64 @@ body {
   color: #9ca3af;
 }
 
+
+.today-event-block {
+  margin: 2px 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.12); /* soft blue */
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  font-size: 0.75rem;
+}
+
+.today-event-block-title {
+  font-weight: 500;
+}
+.today-event-block-time {
+  font-size: 0.7rem;
+  color: #2563eb; /* blue-600 */
+}
+
+.today-day-body {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+}
+
+/* left column hour labels */
+.today-hours-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.today-hour-row {
+  height: 60px;          /* must match HOUR_HEIGHT */
+  font-size: 0.75rem;
+  color: #9ca3af;
+  display: flex;
+  align-items: flex-start;
+  padding-top: 2px;
+}
+
+/* right timeline */
+.today-timeline {
+  position: relative;
+  overflow-y: auto;
+}
+
+.today-timeline-hour-line {
+  height: 60px;                /* must also match HOUR_HEIGHT */
+  border-top: 1px solid #f3f4f6;
+}
+
+/* event blocks */
+.today-event-block {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  box-sizing: border-box;
+}

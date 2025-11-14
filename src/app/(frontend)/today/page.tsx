@@ -4,12 +4,42 @@ import { useSession } from "next-auth/react"; //lets you know if user is logged 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
+const HOUR_HEIGHT = 60; 
+const PX_PER_MIN = HOUR_HEIGHT/60 // tweak how “tall” the day looks. each min is 1.5px rn
+
+type CalEvent = {
+  id: string;
+  summary?: string;
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+};
+
+function getEventPosition(ev: CalEvent) {
+  const startStr = ev.start?.dateTime ?? ev.start?.date;
+  const endStr   = ev.end?.dateTime   ?? ev.end?.date;
+
+  if (!startStr || !endStr) {
+    return { top: 0, height: 0 }; // fallback
+  }
+
+  const start = new Date(startStr);
+  const end   = new Date(endStr);
+
+  const minutesFromMidnight = start.getHours() * 60 + start.getMinutes(); // how many minutes since 00:00, e.g. 1:30am = 90
+  const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60); // duration in minutes
+
+  const topPx = minutesFromMidnight * PX_PER_MIN; // position from top
+  const heightPx = Math.max(20, durationMinutes * PX_PER_MIN); // min height
+
+  return { top: topPx, height: heightPx };
+}
+
 export default function TodayPage() {
   const { data: session, status } = useSession(); //synta: data: name, fields. saying data is renamed to session, has status fields
   // data is object storing info about user. status is to check if user is loading/authentictated/unauthenticated.
 
   const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState<any[]>([]); //change this to type Event later. These are all the events (blocks) today
+  const [events, setEvents] = useState<CalEvent[]>([]); 
   const [error, setError] = useState<string | null>(null);
 
   const now = new Date();
@@ -61,7 +91,7 @@ export default function TodayPage() {
     load();
   }, [status]);
 
-  return (
+     return (
     <main className="today-root">
       <header className="today-header">
         <div>
@@ -73,7 +103,7 @@ export default function TodayPage() {
         </Link>
       </header>
 
-      {/* auth + loading + events list */}
+      {/* status / error messages */}
       {status === "loading" && (
         <p className="today-info">Checking your session…</p>
       )}
@@ -84,50 +114,53 @@ export default function TodayPage() {
         </p>
       )}
 
-      {status === "authenticated" && (
-        <section className="today-events">
-          {loading && (
-            <p className="today-info">Loading today&apos;s events…</p>
-          )}
-
-          {error && <p className="today-info">{error}</p>}
-
-          {!loading && !error && events.length === 0 && (
-            <p className="today-info">No events found for today.</p>
-          )}
-
-          <ul className="today-events-list">
-            {events.map((ev) => (
-              <li key={ev.id} className="today-event-card">
-                <div className="today-event-title">
-                  {ev.summary || "(no title)"}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {status === "authenticated" && error && (
+        <p className="today-info">{error}</p>
       )}
 
-      {/* hourly grid background */}
       <section className="today-calendar today-calendar-day">
         <div className="today-day-header">
           <div className="today-time-col" />
           <div className="today-day-label">Today</div>
         </div>
 
-        <div className="today-day-grid">
-          {hours.map((hour) => (
-            <div key={hour} className="today-row">
-              <div className="today-time">
+        {/* left: hour labels, right: continuous timeline */}
+        <div className="today-day-body">
+          {/* hour labels */}
+          <div className="today-hours-col">
+            {hours.map((hour) => (
+              <div key={hour} className="today-hour-row">
                 {hour.toString().padStart(2, "0")}:00
               </div>
-              <div className="today-day-cell">
-                {/* later: render blocks in the right hour */}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
+
+          {/* scrollable vertical timeline with absolute event blocks */}
+          <div className="today-timeline">
+            {/* optional faint hour lines */}
+            {hours.map((hour) => (
+              <div key={hour} className="today-timeline-hour-line" />
+            ))}
+
+            {status === "authenticated" &&
+              events.map((ev) => {
+                const { top, height } = getEventPosition(ev as CalEvent);
+                return (
+                  <div
+                    key={ev.id}
+                    className="today-event-block"
+                    style={{ top, height }}
+                  >
+                    <div className="today-event-block-title">
+                      {ev.summary || "(no title)"}
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
         </div>
       </section>
     </main>
   );
+
 }
