@@ -4,26 +4,27 @@ import { useSession } from "next-auth/react"; //lets you know if user is logged 
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-const HOUR_HEIGHT = 60; 
-const PX_PER_MIN = HOUR_HEIGHT/60 // tweak how “tall” the day looks. each min is 1.5px rn
+const HOUR_HEIGHT = 60;
+const PX_PER_MIN = HOUR_HEIGHT / 60; // tweak how “tall” the day looks. each min is 1.5px rn
 
 type CalEvent = {
   id: string;
   summary?: string;
+  location?: string;
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
 };
 
 function getEventPosition(ev: CalEvent) {
   const startStr = ev.start?.dateTime ?? ev.start?.date;
-  const endStr   = ev.end?.dateTime   ?? ev.end?.date;
+  const endStr = ev.end?.dateTime ?? ev.end?.date;
 
   if (!startStr || !endStr) {
     return { top: 0, height: 0 }; // fallback
   }
 
   const start = new Date(startStr);
-  const end   = new Date(endStr);
+  const end = new Date(endStr);
 
   const minutesFromMidnight = start.getHours() * 60 + start.getMinutes(); // how many minutes since 00:00, e.g. 1:30am = 90
   const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60); // duration in minutes
@@ -34,13 +35,34 @@ function getEventPosition(ev: CalEvent) {
   return { top: topPx, height: heightPx };
 }
 
+function formatEventTime(ev: CalEvent): string {
+  //formats time for so it looks like "10:00 AM – 11:00 AM" when displayed or smt
+  const startStr = ev.start?.dateTime ?? ev.start?.date;
+  const endStr = ev.end?.dateTime ?? ev.end?.date;
+  if (!startStr || !endStr) return "";
+
+  const start = new Date(startStr);
+  const end = new Date(endStr);
+
+  const opts: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+  };
+
+  return `${start.toLocaleTimeString(
+    undefined,
+    opts
+  )} – ${end.toLocaleTimeString(undefined, opts)}`;
+}
+
 export default function TodayPage() {
   const { data: session, status } = useSession(); //synta: data: name, fields. saying data is renamed to session, has status fields
   // data is object storing info about user. status is to check if user is loading/authentictated/unauthenticated.
 
   const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState<CalEvent[]>([]); 
+  const [events, setEvents] = useState<CalEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [nowLine, setNowLine] = useState<number | null>(null);
 
   const now = new Date();
   const weekday = now.toLocaleDateString(undefined, { weekday: "long" });
@@ -75,7 +97,7 @@ export default function TodayPage() {
           )}&timeMax=${encodeURIComponent(endOfDay.toISOString())}`
         );
         if (!response.ok) {
-          console.log("lalalalala")
+          console.log("lalalalala");
           throw new Error(await response.text()); // how to store in setError?
         }
 
@@ -91,7 +113,19 @@ export default function TodayPage() {
     load();
   }, [status]);
 
-     return (
+  useEffect(() => {
+    // update once immediately, then every minute
+    const update = () => {
+      const now = new Date();
+      const minutesFromMidnight = now.getHours() * 60 + now.getMinutes();
+      setNowLine(minutesFromMidnight * PX_PER_MIN);
+    };
+    update();
+    const id = setInterval(update, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
     <main className="today-root">
       <header className="today-header">
         <div>
@@ -135,8 +169,10 @@ export default function TodayPage() {
             ))}
           </div>
 
-          {/* scrollable vertical timeline with absolute event blocks */}
           <div className="today-timeline">
+            {nowLine !== null && (
+    <div className="today-now-line" style={{ top: nowLine }} />
+  )}
             {/* optional faint hour lines */}
             {hours.map((hour) => (
               <div key={hour} className="today-timeline-hour-line" />
@@ -144,7 +180,7 @@ export default function TodayPage() {
 
             {status === "authenticated" &&
               events.map((ev) => {
-                const { top, height } = getEventPosition(ev as CalEvent);
+                const { top, height } = getEventPosition(ev);
                 return (
                   <div
                     key={ev.id}
@@ -154,6 +190,14 @@ export default function TodayPage() {
                     <div className="today-event-block-title">
                       {ev.summary || "(no title)"}
                     </div>
+                    <div className="today-event-block-time">
+                      {formatEventTime(ev)}
+                    </div>
+                    {ev.location && (
+                      <div className="today-event-block-location">
+                        {ev.location}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -162,5 +206,4 @@ export default function TodayPage() {
       </section>
     </main>
   );
-
 }

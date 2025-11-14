@@ -19,16 +19,32 @@
   }
 }
 
+/* NEW: lock page height and disable page scroll */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
 .today-root {
-  min-height: 100vh;
+  /* min-height: 100vh; */     /* OLD */
+  height: 100vh;               /* NEW: fixed to viewport */
+  overflow: hidden;            /* NEW: main/page does not scroll */
   padding: 1.5rem 2rem;
-  background: radial-gradient(circle at top left, #e0f2fe 0, #f9fafb 45%, #f3e8ff 100%);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  background: radial-gradient(
+    circle at top left,
+    #e0f2fe 0,
+    #f9fafb 45%,
+    #f3e8ff 100%
+  );
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    sans-serif;
 }
 
 .today-header {
@@ -109,7 +125,11 @@ body {
 .today-cell {
   border-left: 1px solid #f3f4f6;
   height: 40px;
-  background: linear-gradient(to bottom, rgba(249, 250, 251, 0.7), rgba(249, 250, 251, 0.3));
+  background: linear-gradient(
+    to bottom,
+    rgba(249, 250, 251, 0.7),
+    rgba(249, 250, 251, 0.3)
+  );
 }
 
 .today-events {
@@ -158,7 +178,6 @@ body {
   color: #9ca3af;
 }
 
-
 .today-event-block {
   margin: 2px 0;
   padding: 4px 8px;
@@ -176,9 +195,17 @@ body {
   color: #2563eb; /* blue-600 */
 }
 
+.today-day-label {
+  font-size: 1.3rem;
+  color: #6b7280;
+  margin-bottom: 0.5rem;
+}
+
 .today-day-body {
   display: grid;
   grid-template-columns: 60px 1fr;
+  max-height: 600px;        /* or calc(100vh - headerHeight) */
+  overflow-y: auto;         /* only this part scrolls */
 }
 
 /* left column hour labels */
@@ -188,7 +215,7 @@ body {
 }
 
 .today-hour-row {
-  height: 60px;          /* must match HOUR_HEIGHT */
+  height: 60px; /* must match HOUR_HEIGHT */
   font-size: 0.75rem;
   color: #9ca3af;
   display: flex;
@@ -199,11 +226,11 @@ body {
 /* right timeline */
 .today-timeline {
   position: relative;
-  overflow-y: auto;
+  /* overflow-y: auto; */    /* timeline itself no longer scrolls */
 }
 
 .today-timeline-hour-line {
-  height: 60px;                /* must also match HOUR_HEIGHT */
+  height: 60px; /* must also match HOUR_HEIGHT */
   border-top: 1px solid #f3f4f6;
 }
 
@@ -218,4 +245,38 @@ body {
   font-size: 0.75rem;
   padding: 4px 8px;
   box-sizing: border-box;
+}
+
+.today-event-block-title {
+  font-weight: 600;
+  margin-bottom: 2px;
+  color: #6b7280;
+}
+
+.today-event-block-time {
+  font-size: 0.7rem;
+  color: #6b7280;
+}
+
+.today-event-block-location {
+  font-size: 0.7rem;
+  color: #9ca3af;
+}
+.today-event-block:hover {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: rgba(59, 130, 246, 0.5);
+}
+
+.today-timeline {
+  position: relative;
+  height: calc(24 * 60px);  
+}
+.today-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ef4444;    /* red */
+  z-index: 10;
+  pointer-events: none;
 }
