@@ -57,6 +57,7 @@ body {
 .today-title {
   font-size: 1.6rem;
   font-weight: 600;
+  color: #6b7280;
 }
 
 .today-subtitle {
@@ -71,6 +72,8 @@ body {
   background: white;
   font-size: 0.85rem;
   cursor: pointer;
+  color: #6b7280;
+
 }
 
 .today-today-btn:hover {
