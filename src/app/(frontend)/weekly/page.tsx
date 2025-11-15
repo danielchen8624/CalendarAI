@@ -12,7 +12,7 @@ export default function WeeklyPage() {
     <main className="today-root">
       <header className="today-header">
         <div>
-          <h1 className="today-title">Today</h1>
+          <h1 className="today-title">Weekly</h1>
           <p className="today-subtitle">Your week at a glance</p>
         </div>
         <Link href  = "/today">
