@@ -4,41 +4,78 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
 
 export async function POST(req: NextRequest) {
-
+  // 1) who is this?
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return new Response("Unauthorized", { status: 401 });
   }
   const email = session.user.email;
 
-  const { data: userRow, error: userErr } = await supabase //sees if user exists
-  .from("users") //from users table
-  .select("id") //select only id field
-  .eq("email", email) //where email = email
-  .single(); //expect only one row
-  
+  const { data: userRow, error: userErr } = await supabase
+    .from("users")
+    .select("id")
+    .eq("email", email)
+    .single();
+
   if (userErr || !userRow) {
     return new Response("User not found", { status: 404 });
   }
 
-  const body = await req.json(); // { title, start, end, ... } // parse request body
+  const user_id = userRow.id as string;
 
-  const { data, error } = await supabase
-    .from("items") // insert into items table. idk why its from think of it as into
-    .insert({
-      user_id: userRow.id,
-      calendar_id: "63ed2a7f-670e-4cec-962d-03620e29ee53",
-      object_id: "9c568275-5dd6-4af9-a817-8dd88d7300d3",
-      title: body.title,  
-      description: body.description ?? null,
-      location: body.location ?? null,
-      start_at: body.start,
-      duration_min: body.duration_min ?? 60,
-      recurrence_rrule: body.recurrence_rrule ?? null,
-    })
-    .select() 
+  // 2) find this user's calendar instead of hard-coding it
+  const { data: calRow, error: calErr } = await supabase
+    .from("calendar")
+    .select("id")
+    .eq("user_id", user_id)        // <- adjust if your calendar schema differs
+    .limit(1)
     .single();
 
-  if (error) return new Response(error.message, { status: 500 });
+  if (calErr || !calRow) {
+    console.error("No calendar row for user", user_id, calErr);
+    return new Response("No calendar configured for user", { status: 500 });
+  }
+
+  const calendar_id = calRow.id as string;
+
+  // 3) parse body and require the important bits
+  const body = await req.json();
+
+  const {
+    title,
+    description,
+    location,
+    start_at,          // ISO string
+    duration_min,
+    recurrence_rrule,
+    object_id,         // from "select object" in your modal
+  } = body;
+
+  if (!title || !start_at || !duration_min || !object_id) {
+    return new Response("Missing required fields", { status: 400 });
+  }
+
+  // 4) insert full row into items
+  const { data, error } = await supabase
+    .from("items")
+    .insert({
+      user_id,
+      calendar_id,
+      object_id,
+      title,
+      description: description ?? "",      // your schema default is ''::text
+      location: location ?? null,
+      start_at,                            // matches column name
+      duration_min,                        // already validated above
+      recurrence_rrule: recurrence_rrule ?? null,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("items insert failed", error);
+    return new Response(error.message, { status: 500 });
+  }
+
   return Response.json({ item: data });
 }
