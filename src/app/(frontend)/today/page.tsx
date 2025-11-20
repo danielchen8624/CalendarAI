@@ -166,9 +166,7 @@ export default function TodayPage() {
       )}
 
       {status === "unauthenticated" && !loading && (
-        <p className="today-info">
-          Sign in to see your events for today.
-        </p>
+        <p className="today-info">Sign in to see your events for today.</p>
       )}
 
       {status === "authenticated" && error && (
@@ -305,8 +303,38 @@ function NewEventModal({ start, onClose, onCreated }: NewEventModalProps) {
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
   const [recurrence, setRecurrence] = useState("");
-  const [objectId, setObjectId] = useState(""); // temporary: user types object id
+  const [objectId, setObjectId] = useState(""); // selected object id
   const [saving, setSaving] = useState(false);
+
+  // NEW: objects for dropdown
+  const [objects, setObjects] = useState<{ id: string; name: string }[]>([]);
+  const [objectsLoading, setObjectsLoading] = useState(true);
+  const [objectsError, setObjectsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadObjects = async () => {
+      try {
+        setObjectsLoading(true);
+        setObjectsError(null);
+
+        const res = await fetch("/api/object", { cache: "no-store" });
+        if (!res.ok) {
+          const text = await res.text();
+          console.error("Load objects error", res.status, text);
+          throw new Error("Failed to load objects");
+        }
+
+        const data = await res.json();
+        setObjects(data.objects ?? []);
+      } catch (err: any) {
+        setObjectsError(err.message ?? "Failed to load your objects");
+      } finally {
+        setObjectsLoading(false);
+      }
+    };
+
+    loadObjects();
+  }, []);
 
   const startStr = start.toLocaleTimeString(undefined, {
     hour: "numeric",
@@ -327,7 +355,7 @@ function NewEventModal({ start, onClose, onCreated }: NewEventModalProps) {
           start_at: start.toISOString(),
           duration_min: durationMin,
           recurrence_rrule: recurrence || null,
-          object_id: objectId || null, // must be non-null to satisfy schema later
+          object_id: objectId || null, // selected from dropdown
         }),
       });
       if (!res.ok) {
@@ -432,19 +460,42 @@ function NewEventModal({ start, onClose, onCreated }: NewEventModalProps) {
             />
           </div>
 
+          {/* UPDATED: object dropdown */}
           <div>
             <label className="block text-xs font-medium text-slate-700 mb-1">
-              Object ID (temp)
+              Object
             </label>
-            <input
-              className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400"
-              placeholder="enter object uuid"
-              value={objectId}
-              onChange={(e) => setObjectId(e.target.value)}
-              required
-            />
+
+            {objectsLoading ? (
+              <p className="text-[11px] text-slate-500">
+                Loading your objects…
+              </p>
+            ) : objectsError ? (
+              <p className="text-[11px] text-red-500">{objectsError}</p>
+            ) : objects.length === 0 ? (
+              <p className="text-[11px] text-slate-500">
+                You don’t have any objects yet. Create one on the Objects page
+                first.
+              </p>
+            ) : (
+              <select
+                className="w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400"
+                value={objectId}
+                onChange={(e) => setObjectId(e.target.value)}
+                required
+              >
+                <option value="">Select an object</option>
+                {objects.map((obj) => (
+                  <option key={obj.id} value={obj.id}>
+                    {obj.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             <p className="mt-1 text-[10px] text-slate-500">
-              Later this becomes a dropdown of your saved objects.
+              This links the block to one of your saved objects (CS135, gym,
+              etc.).
             </p>
           </div>
 

@@ -1,4 +1,3 @@
-// app/api/items/route.ts
 import { NextRequest } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../auth/[...nextauth]/route";
@@ -66,4 +65,37 @@ export async function POST(req: NextRequest) {
 
   // 6) Return just the new item to the frontend
   return Response.json({ object: objRow });
+}
+
+export async function GET(req: NextRequest) {
+  const session = await getServerSession(authOptions);
+
+  if (!session?.user?.email) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+  const email = session.user.email;
+
+  const { data: userRow, error: userErr } = await supabase
+    .from("users")
+    .select("id")
+    .eq("email", email)
+    .single();
+
+  if (userErr || !userRow) {
+    console.error("User lookup error", userErr);
+    return new Response("User not found", { status: 404 });
+  }
+
+  const { data, error } = await supabase
+    .from("object")
+    .select("id, name, current_weight, class_id")
+    .eq("owner_user_id", userRow.id)
+    .order("current_weight", { ascending: false });
+
+  if (error) {
+    console.error("Object fetch error", error);
+    return new Response("Failed to load objects", { status: 500 });
+  }
+
+  return Response.json({ objects: data ?? [] });
 }

@@ -137,7 +137,7 @@ export default function ObjectsPage() {
               <div className="cal-field">
                 <label className="cal-label">Class</label>
                 {classesLoading ? (
-                  <p className="cal-form-subtitle">Loading classes…</p>
+                  <p className="cal-form-subtitle">Non-Negotiable</p>
                 ) : classes.length === 0 ? (
                   <p className="cal-form-subtitle">
                     No classes defined yet.
