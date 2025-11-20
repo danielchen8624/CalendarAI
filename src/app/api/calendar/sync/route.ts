@@ -120,12 +120,62 @@ export async function POST(req: NextRequest) {
     })
     .filter(Boolean) as any[];
 
+   // 6) If Google says there are NO events in this window -> delete all in this window
   if (rows.length === 0) {
-    return Response.json({ inserted: 0, updated: 0 });
+    const { error: deleteAllError } = await supabase
+      .from("outside_calendar_events")
+      .delete()
+      .eq("user_id", user_id)
+      .eq("calendar_id", calendar_id)
+      .gte("start_at", timeMin)
+      .lt("start_at", timeMax);
+
+    if (deleteAllError) {
+      console.error("Delete-all window error", deleteAllError);
+      return new Response("Failed to clean up stale events", { status: 500 });
+    }
+
+    return Response.json({ count: 0 });
   }
 
-  // 6) upsert into outside_calendar_events
-  const { data: upsertData, error: upsertError } = await supabase
+  // 7) Compute which events vanished from Google
+  const latestIds = rows.map((r) => r.provider_event_id as string);
+
+  const { data: existing, error: existingErr } = await supabase
+    .from("outside_calendar_events")
+    .select("provider_event_id")
+    .eq("user_id", user_id)
+    .eq("calendar_id", calendar_id)
+    .gte("start_at", timeMin)
+    .lt("start_at", timeMax);
+
+  if (existingErr) {
+    console.error("Fetch existing events error", existingErr);
+    return new Response("Failed to clean up stale events", { status: 500 });
+  }
+
+  const existingIds = (existing ?? []).map(
+    (e: any) => e.provider_event_id as string
+  );
+
+  const staleIds = existingIds.filter((id) => !latestIds.includes(id));
+
+  if (staleIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("outside_calendar_events")
+      .delete()
+      .eq("user_id", user_id)
+      .eq("calendar_id", calendar_id)
+      .in("provider_event_id", staleIds);
+
+    if (deleteError) {
+      console.error("Delete stale events error", deleteError);
+      return new Response("Failed to clean up stale events", { status: 500 });
+    }
+  }
+
+  // 8) Upsert insert/update the current Google events
+  const { error: upsertError } = await supabase
     .from("outside_calendar_events")
     .upsert(rows, {
       onConflict: "calendar_id,provider_event_id",
@@ -137,6 +187,5 @@ export async function POST(req: NextRequest) {
   }
 
   return Response.json({
-    count: rows.length ?? 0,
-  });
-}
+    count: rows.length,
+  })};
