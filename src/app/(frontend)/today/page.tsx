@@ -3,21 +3,14 @@
 import { useSession } from "next-auth/react"; //lets you know if user is logged in
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { CalendarBlock } from "@/types/calendarTypes";
 
 const HOUR_HEIGHT = 60;
 const PX_PER_MIN = HOUR_HEIGHT / 60; // tweak how “tall” the day looks. each min is 1.5px rn
 
-type CalEvent = {
-  id: string;
-  summary?: string;
-  location?: string;
-  start?: { dateTime?: string; date?: string };
-  end?: { dateTime?: string; date?: string };
-};
-
-function getEventPosition(ev: CalEvent) {
-  const startStr = ev.start?.dateTime ?? ev.start?.date;
-  const endStr = ev.end?.dateTime ?? ev.end?.date;
+function getEventPosition(block: CalendarBlock) {
+  const startStr = block.startAt;
+  const endStr = block.endAt;
 
   if (!startStr || !endStr) {
     return { top: 0, height: 0 }; // fallback
@@ -26,19 +19,19 @@ function getEventPosition(ev: CalEvent) {
   const start = new Date(startStr);
   const end = new Date(endStr);
 
-  const minutesFromMidnight = start.getHours() * 60 + start.getMinutes(); // how many minutes since 00:00, e.g. 1:30am = 90
-  const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60); // duration in minutes
+  const minutesFromMidnight = start.getHours() * 60 + start.getMinutes();
+  const durationMinutes = (end.getTime() - start.getTime()) / (1000 * 60);
 
-  const topPx = minutesFromMidnight * PX_PER_MIN; // position from top
-  const heightPx = Math.max(20, durationMinutes * PX_PER_MIN); // min height
+  const topPx = minutesFromMidnight * PX_PER_MIN;
+  const heightPx = Math.max(20, durationMinutes * PX_PER_MIN);
 
   return { top: topPx, height: heightPx };
 }
 
-function formatEventTime(ev: CalEvent): string {
+function formatEventTime(block: CalendarBlock): string {
   //formats time for so it looks like "10:00 AM – 11:00 AM" when displayed or smt
-  const startStr = ev.start?.dateTime ?? ev.start?.date;
-  const endStr = ev.end?.dateTime ?? ev.end?.date;
+  const startStr = block.startAt;
+  const endStr = block.endAt;
   if (!startStr || !endStr) return "";
 
   const start = new Date(startStr);
@@ -55,12 +48,13 @@ function formatEventTime(ev: CalEvent): string {
   )} – ${end.toLocaleTimeString(undefined, opts)}`;
 }
 
+
 export default function TodayPage() {
   const { data: session, status } = useSession(); //synta: data: name, fields. saying data is renamed to session, has status fields
   // data is object storing info about user. status is to check if user is loading/authentictated/unauthenticated.
 
   const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState<CalEvent[]>([]);
+  const [blocks, setBlocks] = useState<CalendarBlock[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [nowLine, setNowLine] = useState<number | null>(null);
 
@@ -74,46 +68,72 @@ export default function TodayPage() {
 
   const hours = Array.from({ length: 24 }, (_, h) => h);
 
-  useEffect(() => {
-    if (status !== "authenticated") {
-      setLoading(false);
-      return;
-    }
+ useEffect(() => {
+  if (status !== "authenticated") {
+    setLoading(false);
+    return;
+  }
 
-    const load = async () => {
-      setLoading(true);
-      setError(null);
+  const run = async () => {
+    setLoading(true);
+    setError(null);
 
-      try {
-        const startOfDay = new Date();
-        startOfDay.setHours(0, 0, 0, 0);
-        const endOfDay = new Date();
-        endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date();
+    endOfDay.setHours(23, 59, 59, 999);
 
-        //calls api route to get events from startOfDay to endOfDay (essentially just today)
-        const response = await fetch(
-          `/api/calendar/events?timeMin=${encodeURIComponent(
-            startOfDay.toISOString()
-          )}&timeMax=${encodeURIComponent(endOfDay.toISOString())}`
-        );
-        if (!response.ok) {
-          console.log("lalalalala");
-          throw new Error(await response.text()); // how to store in setError?
-        }
+    const timeMin = startOfDay.toISOString();
+    const timeMax = endOfDay.toISOString();
 
-        const data = await response.json();
-        setEvents(data.items ?? []);
-      } catch (err: any) {
-        setError(err.message ?? "Failed to load events");
-      } finally {
-        setLoading(false);
+    // helper to load blocks from DB
+    const loadBlocks = async () => {
+      const res = await fetch(
+        `/api/calendar/getEvents?timeMin=${encodeURIComponent(
+          timeMin
+        )}&timeMax=${encodeURIComponent(timeMax)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Blocks API error", res.status, text);
+        throw new Error("Failed to load schedule");
       }
+      const data = await res.json();
+      setBlocks(data.blocks ?? []);
     };
 
-    load();
-  }, [status]);
+    try {
+      // 1) initial render from DB
+      await loadBlocks();
 
-  useEffect(() => {
+      // 2) sync Google -> DB in background
+      const syncRes = await fetch(
+        `/api/calendar/sync?timeMin=${encodeURIComponent(
+          timeMin
+        )}&timeMax=${encodeURIComponent(timeMax)}`,
+        { method: "POST" }
+      );
+      if (!syncRes.ok) {
+        const text = await syncRes.text();
+        console.error("Sync error", syncRes.status, text);
+        // don't throw; we still have stale blocks
+      } else {
+        // 3) after sync succeeds, reload from DB to get fresh blocks
+        await loadBlocks();
+      }
+    } catch (err: any) {
+      setError(err.message ?? "Failed to load events");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  run();
+}, [status]);
+
+
+  useEffect(() => { 
     // update once immediately, then every minute
     const update = () => {
       const now = new Date();
@@ -144,7 +164,7 @@ export default function TodayPage() {
 
       {status === "unauthenticated" && !loading && (
         <p className="today-info">
-          Sign in to see your Google Calendar events for today.
+          Sign in to see your events for today.
         </p>
       )}
 
@@ -171,31 +191,31 @@ export default function TodayPage() {
 
           <div className="today-timeline">
             {nowLine !== null && (
-    <div className="today-now-line" style={{ top: nowLine }} />
-  )}
+              <div className="today-now-line" style={{ top: nowLine }} />
+            )}
             {/* optional faint hour lines */}
             {hours.map((hour) => (
               <div key={hour} className="today-timeline-hour-line" />
             ))}
 
             {status === "authenticated" &&
-              events.map((ev) => {
-                const { top, height } = getEventPosition(ev);
+              blocks.map((block) => {
+                const { top, height } = getEventPosition(block);
                 return (
                   <div
-                    key={ev.id}
+                    key={block.id}
                     className="today-event-block"
                     style={{ top, height }}
                   >
                     <div className="today-event-block-title">
-                      {ev.summary || "(no title)"}
+                      {block.title || "(no title)"}
                     </div>
                     <div className="today-event-block-time">
-                      {formatEventTime(ev)}
+                      {formatEventTime(block)}
                     </div>
-                    {ev.location && (
+                    {block.location && (
                       <div className="today-event-block-location">
-                        {ev.location}
+                        {block.location}
                       </div>
                     )}
                   </div>
