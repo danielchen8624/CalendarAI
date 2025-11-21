@@ -165,6 +165,9 @@ export default function TodayPage() {
   // NEW: resize state
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
+  // NEW: suppress click after drag
+  const [justDragged, setJustDragged] = useState(false);
+
   const now = new Date();
   const weekday = now.toLocaleDateString(undefined, { weekday: "long" });
   const dateStr = now.toLocaleDateString(undefined, {
@@ -297,6 +300,12 @@ export default function TodayPage() {
             className="today-timeline"
             ref={timelineRef}
             onClick={(e) => {
+              // NEW: ignore the first click right after a drag/resize
+              if (justDragged) {
+                setJustDragged(false);
+                return;
+              }
+
               if (!timelineRef.current) return;
 
               const rect = timelineRef.current.getBoundingClientRect();
@@ -321,6 +330,15 @@ export default function TodayPage() {
             }}
             onMouseMove={(e) => {
               if (!timelineRef.current) return;
+
+              // NEW: if mouse button is not held, stop dragging/resizing
+              if (e.buttons === 0) {
+                if (dragState || resizeState) {
+                  setDragState(null);
+                  setResizeState(null);
+                }
+                return;
+              }
 
               const rect = timelineRef.current.getBoundingClientRect();
               const y = e.clientY - rect.top;
@@ -398,7 +416,6 @@ export default function TodayPage() {
             onMouseUp={async () => {
               if (!dragState && !resizeState) return;
 
-              // figure out which block was moved/resized
               const movedId = dragState?.id ?? resizeState?.id;
               const movedBlock = blocks.find((b) => b.id === movedId);
 
@@ -408,28 +425,25 @@ export default function TodayPage() {
                     new Date(movedBlock.startAt).getTime()) /
                   60000;
 
-                // decide whether this was a local item or an outside event
-                const kind = (movedBlock as any).kind;
-                const source = kind === "item" ? "item" : "outside";
-
                 try {
                   await fetch("/api/patchEventsAfterMoving", {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                      source,
+                      source: movedBlock.kind === "external" ? "outside" : "item",
                       id: movedBlock.id,
                       start_at: movedBlock.startAt,
                       duration_min: durationMin,
                     }),
                   });
                 } catch (err) {
-                  console.error("Failed to persist block move/resize", err);
+                  console.error("Failed to persist item move/resize", err);
                 }
               }
 
               setDragState(null);
               setResizeState(null);
+              setJustDragged(true); // NEW: remember that we just dragged/resized
             }}
             onMouseLeave={() => {
               if (!dragState && !resizeState) return;
@@ -572,50 +586,49 @@ export default function TodayPage() {
         </div>
       </section>
 
-      {isNewOpen && draftStart &&
-        (
-          <NewEventModal
-            start={draftStart}
-            onClose={() => {
-              setIsNewOpen(false);
-              setDraftStart(null); // clear placeholder on cancel
-            }}
-            onCreated={async () => {
-              setIsNewOpen(false);
-              setDraftStart(null); // clear placeholder on create
-              try {
-                setLoading(true);
-                setError(null);
+      {isNewOpen && draftStart && (
+        <NewEventModal
+          start={draftStart}
+          onClose={() => {
+            setIsNewOpen(false);
+            setDraftStart(null); // clear placeholder on cancel
+          }}
+          onCreated={async () => {
+            setIsNewOpen(false);
+            setDraftStart(null); // clear placeholder on create
+            try {
+              setLoading(true);
+              setError(null);
 
-                const startOfDay = new Date();
-                startOfDay.setHours(0, 0, 0, 0);
-                const endOfDay = new Date();
-                endOfDay.setHours(23, 59, 59, 999);
+              const startOfDay = new Date();
+              startOfDay.setHours(0, 0, 0, 0);
+              const endOfDay = new Date();
+              endOfDay.setHours(23, 59, 59, 999);
 
-                const timeMin = startOfDay.toISOString();
-                const timeMax = endOfDay.toISOString();
+              const timeMin = startOfDay.toISOString();
+              const timeMax = endOfDay.toISOString();
 
-                const res = await fetch(
-                  `/api/calendar/getEvents?timeMin=${encodeURIComponent(
-                    timeMin
-                  )}&timeMax=${encodeURIComponent(timeMax)}`,
-                  { cache: "no-store" }
-                );
-                if (!res.ok) {
-                  const text = await res.text();
-                  console.error("Blocks API error", res.status, text);
-                  throw new Error("Failed to load schedule");
-                }
-                const data = await res.json();
-                setBlocks(data.blocks ?? []);
-              } catch (err: any) {
-                setError(err.message ?? "Failed to load events");
-              } finally {
-                setLoading(false);
+              const res = await fetch(
+                `/api/calendar/getEvents?timeMin=${encodeURIComponent(
+                  timeMin
+                )}&timeMax=${encodeURIComponent(timeMax)}`,
+                { cache: "no-store" }
+              );
+              if (!res.ok) {
+                const text = await res.text();
+                console.error("Blocks API error", res.status, text);
+                throw new Error("Failed to load schedule");
               }
-            }}
-          />
-        )}
+              const data = await res.json();
+              setBlocks(data.blocks ?? []);
+            } catch (err: any) {
+              setError(err.message ?? "Failed to load events");
+            } finally {
+              setLoading(false);
+            }
+          }}
+        />
+      )}
     </main>
   );
 }
@@ -850,3 +863,4 @@ function NewEventModal({ start, onClose, onCreated }: NewEventModalProps) {
     </div>
   );
 }
+
