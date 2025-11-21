@@ -48,6 +48,21 @@ function formatEventTime(block: CalendarBlock): string {
   )} – ${end.toLocaleTimeString(undefined, opts)}`;
 }
 
+// NEW: drag state type
+type DragState = {
+  id: CalendarBlock["id"];
+  originalStart: Date;
+  originalEnd: Date;
+  offsetMinutes: number;
+};
+
+// NEW: resize state type
+type ResizeState = {
+  id: CalendarBlock["id"];
+  originalStart: Date;
+  originalEnd: Date;
+};
+
 export default function TodayPage() {
   const { data: session, status } = useSession(); //synta: data: name, fields. saying data is renamed to session, has status fields
   // data is object storing info about user. status is to check if user is loading/authentictated/unauthenticated.
@@ -61,6 +76,12 @@ export default function TodayPage() {
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [draftStart, setDraftStart] = useState<Date | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+
+  // NEW: drag state
+  const [dragState, setDragState] = useState<DragState | null>(null);
+
+  // NEW: resize state
+  const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
   const now = new Date();
   const weekday = now.toLocaleDateString(undefined, { weekday: "long" });
@@ -199,9 +220,14 @@ export default function TodayPage() {
               const rect = timelineRef.current.getBoundingClientRect();
               const y = e.clientY - rect.top; // pixels from top of grid
               const rawMinutes = y / PX_PER_MIN;
+              const SLOT = 30; // minutes per slot
+
               const minutesFromMidnight = Math.max(
                 0,
-                Math.min(24 * 60, Math.round(rawMinutes))
+                Math.min(
+                  24 * 60,
+                  Math.round(rawMinutes / SLOT) * SLOT // snap to nearest 30-min mark
+                )
               );
 
               const start = new Date();
@@ -211,6 +237,115 @@ export default function TodayPage() {
               setDraftStart(start);
               setIsNewOpen(true);
             }}
+            onMouseMove={(e) => {
+              if (!timelineRef.current) return;
+
+              const rect = timelineRef.current.getBoundingClientRect();
+              const y = e.clientY - rect.top;
+              const rawMinutes = y / PX_PER_MIN;
+              const DRAG_SLOT_MIN = 15;
+
+              // RESIZE has priority
+              if (resizeState) {
+                let newEndMinutes = rawMinutes;
+                newEndMinutes = Math.max(
+                  0,
+                  Math.min(24 * 60, newEndMinutes)
+                );
+
+                const snappedEndMinutes =
+                  Math.round(newEndMinutes / DRAG_SLOT_MIN) * DRAG_SLOT_MIN;
+
+                const candidateEnd = new Date();
+                candidateEnd.setHours(0, 0, 0, 0);
+                candidateEnd.setMinutes(snappedEndMinutes);
+
+                const minDuration = 15; // don't let it collapse below 15min
+
+                setBlocks((prev) =>
+                  prev.map((b) => {
+                    if (b.id !== resizeState.id || !b.startAt) return b;
+                    const start = new Date(b.startAt);
+                    const durationMin =
+                      (candidateEnd.getTime() - start.getTime()) / 60000;
+                    if (durationMin < minDuration) return b;
+                    return { ...b, endAt: candidateEnd.toISOString() };
+                  })
+                );
+                return;
+              }
+
+              // DRAG if active
+              if (!dragState) return;
+
+              // where the block's top should be, before snapping
+              let newStartMinutes = rawMinutes - dragState.offsetMinutes;
+
+              newStartMinutes = Math.max(
+                0,
+                Math.min(24 * 60, newStartMinutes)
+              );
+
+              const snappedStartMinutes =
+                Math.round(newStartMinutes / DRAG_SLOT_MIN) * DRAG_SLOT_MIN;
+
+              const newStart = new Date();
+              newStart.setHours(0, 0, 0, 0);
+              newStart.setMinutes(snappedStartMinutes);
+
+              const durationMin =
+                (dragState.originalEnd.getTime() -
+                  dragState.originalStart.getTime()) /
+                60000;
+              const newEnd = new Date(
+                newStart.getTime() + durationMin * 60_000
+              );
+
+              // NEW: prevent dragging onto other blocks
+              const candidateStartMs = newStart.getTime();
+              const candidateEndMs = newEnd.getTime();
+
+              const hasOverlap = blocks.some((b) => {
+                if (b.id === dragState.id || !b.startAt || !b.endAt)
+                  return false;
+                const otherStartMs = new Date(b.startAt).getTime();
+                const otherEndMs = new Date(b.endAt).getTime();
+                // intervals overlap if start < otherEnd && end > otherStart
+                return (
+                  candidateStartMs < otherEndMs &&
+                  candidateEndMs > otherStartMs
+                );
+              });
+
+              if (hasOverlap) {
+                // don't update; visually the block "stops" at the collision
+                return;
+              }
+              // END NEW
+
+              setBlocks((prev) =>
+                prev.map((b) =>
+                  b.id === dragState.id
+                    ? {
+                        ...b,
+                        startAt: newStart.toISOString(),
+                        endAt: newEnd.toISOString(),
+                      }
+                    : b
+                )
+              );
+            }}
+            onMouseUp={() => {
+              if (!dragState && !resizeState) return;
+              // TODO: later persist new times via API
+              setDragState(null);
+              setResizeState(null);
+            }}
+            onMouseLeave={() => {
+              if (!dragState && !resizeState) return;
+              setDragState(null);
+              setResizeState(null);
+            }}
           >
             {nowLine !== null && (
               <div className="today-now-line" style={{ top: nowLine }} />
@@ -219,6 +354,39 @@ export default function TodayPage() {
             {hours.map((hour) => (
               <div key={hour} className="today-timeline-hour-line" />
             ))}
+
+            {/* placeholder block for draftStart */}
+            {draftStart &&
+              (() => {
+                const placeholderDurationMin = 60; // 1-hour placeholder
+                const placeholderEnd = new Date(
+                  draftStart.getTime() + placeholderDurationMin * 60_000
+                );
+                const draftBlock = {
+                  startAt: draftStart.toISOString(),
+                  endAt: placeholderEnd.toISOString(),
+                } as CalendarBlock;
+
+                const { top, height } = getEventPosition(draftBlock);
+
+                return (
+                  <div
+                    className="today-event-block"
+                    style={{
+                      top,
+                      height,
+                      opacity: 0.5,
+                      borderStyle: "dashed",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="today-event-block-title">(new event)</div>
+                    <div className="today-event-block-time">
+                      {formatEventTime(draftBlock)}
+                    </div>
+                  </div>
+                );
+              })()}
 
             {status === "authenticated" &&
               blocks.map((block) => {
@@ -230,17 +398,74 @@ export default function TodayPage() {
                     style={{ top, height }}
                     onClick={(e) => e.stopPropagation()} // don't open modal when clicking an event
                   >
-                    <div className="today-event-block-title">
-                      {block.title || "(no title)"}
-                    </div>
-                    <div className="today-event-block-time">
-                      {formatEventTime(block)}
-                    </div>
-                    {block.location && (
-                      <div className="today-event-block-location">
-                        {block.location}
+                    {/* DRAG BODY: top/middle */}
+                    <div
+                      className="today-event-drag-body"
+                      style={{ height: "calc(100% - 6px)" }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        if (e.button !== 0) return; // only left click
+                        if (!timelineRef.current) return;
+                        if (!block.startAt || !block.endAt) return;
+
+                        const rect =
+                          timelineRef.current.getBoundingClientRect();
+                        const y = e.clientY - rect.top;
+                        const rawMinutes = y / PX_PER_MIN;
+
+                        const start = new Date(block.startAt);
+                        const end = new Date(block.endAt);
+                        const blockStartMinutes =
+                          start.getHours() * 60 + start.getMinutes();
+
+                        setResizeState(null);
+                        setDragState({
+                          id: block.id,
+                          originalStart: start,
+                          originalEnd: end,
+                          offsetMinutes: rawMinutes - blockStartMinutes,
+                        });
+                      }}
+                    >
+                      <div className="today-event-block-title">
+                        {block.title || "(no title)"}
                       </div>
-                    )}
+                      <div className="today-event-block-time">
+                        {formatEventTime(block)}
+                      </div>
+                      {block.location && (
+                        <div className="today-event-block-location">
+                          {block.location}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* RESIZE HANDLE: bottom strip */}
+                    <div
+                      className="today-event-resize-handle"
+                      style={{
+                        height: "6px",
+                        cursor: "ns-resize",
+                        borderTop: "1px solid rgba(0, 0, 0, 0.1)",
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        if (e.button !== 0) return;
+                        if (!block.startAt || !block.endAt) return;
+
+                        const start = new Date(block.startAt);
+                        const end = new Date(block.endAt);
+
+                        setDragState(null);
+                        setResizeState({
+                          id: block.id,
+                          originalStart: start,
+                          originalEnd: end,
+                        });
+                      }}
+                    />
                   </div>
                 );
               })}
@@ -251,9 +476,13 @@ export default function TodayPage() {
       {isNewOpen && draftStart && (
         <NewEventModal
           start={draftStart}
-          onClose={() => setIsNewOpen(false)}
+          onClose={() => {
+            setIsNewOpen(false);
+            setDraftStart(null); // clear placeholder on cancel
+          }}
           onCreated={async () => {
             setIsNewOpen(false);
+            setDraftStart(null); // clear placeholder on create
             try {
               setLoading(true);
               setError(null);
@@ -372,7 +601,7 @@ function NewEventModal({ start, onClose, onCreated }: NewEventModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl border border-slate-200 p-5 today-modal">
         <div className="flex items-start justify-between mb-4">
           <div>
