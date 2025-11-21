@@ -48,6 +48,88 @@ function formatEventTime(block: CalendarBlock): string {
   )} – ${end.toLocaleTimeString(undefined, opts)}`;
 }
 
+// NEW: positioned block type + layout helper
+type PositionedBlock = {
+  block: CalendarBlock;
+  column: number;
+  columnCount: number;
+};
+
+// assign columns to overlapping blocks so they can sit side-by-side
+function layoutBlocks(blocks: CalendarBlock[]): PositionedBlock[] {
+  type Meta = {
+    id: CalendarBlock["id"];
+    startMs: number;
+    endMs: number;
+  };
+
+  const metaList: Meta[] = [];
+
+  for (const b of blocks) {
+    if (!b.startAt || !b.endAt) continue;
+    const startMs = new Date(b.startAt).getTime();
+    const endMs = new Date(b.endAt).getTime();
+    metaList.push({ id: b.id, startMs, endMs });
+  }
+
+  // sort by start time
+  metaList.sort((a, b) => a.startMs - b.startMs);
+
+  type Active = {
+    id: CalendarBlock["id"];
+    endMs: number;
+    col: number;
+    cluster: number;
+  };
+
+  const active: Active[] = [];
+  const metaById = new Map<
+    CalendarBlock["id"],
+    { col: number; cluster: number }
+  >();
+  const clusterCols = new Map<number, number>();
+  let currentCluster = 0;
+
+  for (const ev of metaList) {
+    // drop events that ended before this one starts
+    for (let i = active.length - 1; i >= 0; i--) {
+      if (active[i].endMs <= ev.startMs) {
+        active.splice(i, 1);
+      }
+    }
+
+    // if no active events, we’re starting a new overlap cluster
+    if (active.length === 0 && metaById.size > 0) {
+      currentCluster++;
+    }
+
+    const usedCols = new Set(active.map((a) => a.col));
+    let col = 0;
+    while (usedCols.has(col)) col++;
+
+    metaById.set(ev.id, { col, cluster: currentCluster });
+    active.push({ id: ev.id, endMs: ev.endMs, col, cluster: currentCluster });
+
+    const prev = clusterCols.get(currentCluster) ?? 0;
+    if (col + 1 > prev) {
+      clusterCols.set(currentCluster, col + 1);
+    }
+  }
+
+  return blocks.map((block) => {
+    const meta = metaById.get(block.id);
+    if (!meta) {
+      return { block, column: 0, columnCount: 1 };
+    }
+    const cols = clusterCols.get(meta.cluster) ?? 1;
+    return {
+      block,
+      column: meta.col,
+      columnCount: cols,
+    };
+  });
+}
+
 // NEW: drag state type
 type DragState = {
   id: CalendarBlock["id"];
@@ -301,28 +383,6 @@ export default function TodayPage() {
                 newStart.getTime() + durationMin * 60_000
               );
 
-              // NEW: prevent dragging onto other blocks
-              const candidateStartMs = newStart.getTime();
-              const candidateEndMs = newEnd.getTime();
-
-              const hasOverlap = blocks.some((b) => {
-                if (b.id === dragState.id || !b.startAt || !b.endAt)
-                  return false;
-                const otherStartMs = new Date(b.startAt).getTime();
-                const otherEndMs = new Date(b.endAt).getTime();
-                // intervals overlap if start < otherEnd && end > otherStart
-                return (
-                  candidateStartMs < otherEndMs &&
-                  candidateEndMs > otherStartMs
-                );
-              });
-
-              if (hasOverlap) {
-                // don't update; visually the block "stops" at the collision
-                return;
-              }
-              // END NEW
-
               setBlocks((prev) =>
                 prev.map((b) =>
                   b.id === dragState.id
@@ -389,13 +449,22 @@ export default function TodayPage() {
               })()}
 
             {status === "authenticated" &&
-              blocks.map((block) => {
+              layoutBlocks(blocks).map(({ block, column, columnCount }) => {
                 const { top, height } = getEventPosition(block);
+
+                const widthPct = 100 / columnCount;
+                const leftPct = column * widthPct;
+
                 return (
                   <div
                     key={block.id}
                     className="today-event-block"
-                    style={{ top, height }}
+                    style={{
+                      top,
+                      height,
+                      left: `${leftPct}%`,
+                      width: `${widthPct}%`,
+                    }}
                     onClick={(e) => e.stopPropagation()} // don't open modal when clicking an event
                   >
                     {/* DRAG BODY: top/middle */}
