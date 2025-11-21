@@ -7,4 +7,6 @@ export type CalendarBlock = {
   calendarId: string;
   objectId: string | null;
   location: string | null;
+  source: "item" | "outside";  // which table this came from
+  sourceId: string; // the primary key of that row in that table
 };

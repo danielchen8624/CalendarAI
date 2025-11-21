@@ -4,7 +4,7 @@ import { authOptions } from "../../auth/[...nextauth]/route";
 import { supabase } from "@/lib/supabaseServer";
 
 export async function GET(req: NextRequest) {
-  // 1) Figures out who this is
+  // 1) Who is this
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return new Response("Unauthorized", { status: 401 });
@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
 
   const user_id = userRow.id;
 
-  // 2) Time window from query params 
-  const { searchParams } = new URL(req.url); //kinda like useLocalSearchParams from expo
+  // 2) Time window from query params
+  const { searchParams } = new URL(req.url);
   const timeMin = searchParams.get("timeMin");
   const timeMax = searchParams.get("timeMax");
 
@@ -37,7 +37,9 @@ export async function GET(req: NextRequest) {
   const [itemsRes, outsideRes] = await Promise.all([
     supabase
       .from("items")
-      .select("id, title, start_at, duration_min, calendar_id, object_id, location")
+      .select(
+        "id, title, start_at, duration_min, calendar_id, object_id, location"
+      )
       .eq("user_id", user_id)
       .gte("start_at", timeMin)
       .lt("start_at", timeMax),
@@ -63,34 +65,46 @@ export async function GET(req: NextRequest) {
   const items = itemsRes.data ?? [];
   const outsideEvents = outsideRes.data ?? [];
 
-  // Map to common Block shape
+  // 4) Map to common Block shape
   const itemBlocks = items
     .filter((i) => i.start_at) // guard against null start_at
     .map((i) => {
       const start = new Date(i.start_at as string);
-      const durationMin = (i as any).duration_min as number; // schema says NOT NULL
+      const durationMin = (i as any).duration_min as number;
       const end = new Date(start.getTime() + durationMin * 60_000);
 
       return {
         id: i.id,
         kind: "item" as const,
+        // NEW: tells frontend where this lives in DB
+        source: "item" as const,
+        sourceId: i.id,
+
         title: i.title,
         startAt: start.toISOString(),
         endAt: end.toISOString(),
         calendarId: i.calendar_id,
         objectId: i.object_id,
+        location: i.location,
       };
     });
 
-  const externalBlocks = outsideEvents.map((e) => ({
-    id: e.id,
-    kind: "external" as const,
-    title: e.title,
-    startAt: e.start_at,
-    endAt: e.end_at,
-    calendarId: e.calendar_id,
-    objectId: e.object_id,
-  }));
+  const externalBlocks = outsideEvents
+    .filter((e) => e.start_at && e.end_at)
+    .map((e) => ({
+      id: e.id,
+      kind: "external" as const,
+      // NEW: external = comes from outside_calendar_events table
+      source: "outside" as const,
+      sourceId: e.id,
+
+      title: e.title,
+      startAt: e.start_at,
+      endAt: e.end_at,
+      calendarId: e.calendar_id,
+      objectId: e.object_id,
+      location: e.location,
+    }));
 
   // 5) Merge + sort by startAt
   const blocks = [...itemBlocks, ...externalBlocks].sort(

@@ -395,9 +395,39 @@ export default function TodayPage() {
                 )
               );
             }}
-            onMouseUp={() => {
+            onMouseUp={async () => {
               if (!dragState && !resizeState) return;
-              // TODO: later persist new times via API
+
+              // figure out which block was moved/resized
+              const movedId = dragState?.id ?? resizeState?.id;
+              const movedBlock = blocks.find((b) => b.id === movedId);
+
+              if (movedBlock && movedBlock.startAt && movedBlock.endAt) {
+                const durationMin =
+                  (new Date(movedBlock.endAt).getTime() -
+                    new Date(movedBlock.startAt).getTime()) /
+                  60000;
+
+                // decide whether this was a local item or an outside event
+                const kind = (movedBlock as any).kind;
+                const source = kind === "item" ? "item" : "outside";
+
+                try {
+                  await fetch("/api/patchEventsAfterMoving", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      source,
+                      id: movedBlock.id,
+                      start_at: movedBlock.startAt,
+                      duration_min: durationMin,
+                    }),
+                  });
+                } catch (err) {
+                  console.error("Failed to persist block move/resize", err);
+                }
+              }
+
               setDragState(null);
               setResizeState(null);
             }}
@@ -542,49 +572,50 @@ export default function TodayPage() {
         </div>
       </section>
 
-      {isNewOpen && draftStart && (
-        <NewEventModal
-          start={draftStart}
-          onClose={() => {
-            setIsNewOpen(false);
-            setDraftStart(null); // clear placeholder on cancel
-          }}
-          onCreated={async () => {
-            setIsNewOpen(false);
-            setDraftStart(null); // clear placeholder on create
-            try {
-              setLoading(true);
-              setError(null);
+      {isNewOpen && draftStart &&
+        (
+          <NewEventModal
+            start={draftStart}
+            onClose={() => {
+              setIsNewOpen(false);
+              setDraftStart(null); // clear placeholder on cancel
+            }}
+            onCreated={async () => {
+              setIsNewOpen(false);
+              setDraftStart(null); // clear placeholder on create
+              try {
+                setLoading(true);
+                setError(null);
 
-              const startOfDay = new Date();
-              startOfDay.setHours(0, 0, 0, 0);
-              const endOfDay = new Date();
-              endOfDay.setHours(23, 59, 59, 999);
+                const startOfDay = new Date();
+                startOfDay.setHours(0, 0, 0, 0);
+                const endOfDay = new Date();
+                endOfDay.setHours(23, 59, 59, 999);
 
-              const timeMin = startOfDay.toISOString();
-              const timeMax = endOfDay.toISOString();
+                const timeMin = startOfDay.toISOString();
+                const timeMax = endOfDay.toISOString();
 
-              const res = await fetch(
-                `/api/calendar/getEvents?timeMin=${encodeURIComponent(
-                  timeMin
-                )}&timeMax=${encodeURIComponent(timeMax)}`,
-                { cache: "no-store" }
-              );
-              if (!res.ok) {
-                const text = await res.text();
-                console.error("Blocks API error", res.status, text);
-                throw new Error("Failed to load schedule");
+                const res = await fetch(
+                  `/api/calendar/getEvents?timeMin=${encodeURIComponent(
+                    timeMin
+                  )}&timeMax=${encodeURIComponent(timeMax)}`,
+                  { cache: "no-store" }
+                );
+                if (!res.ok) {
+                  const text = await res.text();
+                  console.error("Blocks API error", res.status, text);
+                  throw new Error("Failed to load schedule");
+                }
+                const data = await res.json();
+                setBlocks(data.blocks ?? []);
+              } catch (err: any) {
+                setError(err.message ?? "Failed to load events");
+              } finally {
+                setLoading(false);
               }
-              const data = await res.json();
-              setBlocks(data.blocks ?? []);
-            } catch (err: any) {
-              setError(err.message ?? "Failed to load events");
-            } finally {
-              setLoading(false);
-            }
-          }}
-        />
-      )}
+            }}
+          />
+        )}
     </main>
   );
 }
