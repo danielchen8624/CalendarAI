@@ -46,7 +46,9 @@ export async function GET(req: NextRequest) {
 
     supabase
       .from("outside_calendar_events")
-      .select("id, title, start_at, end_at, calendar_id, object_id, location")
+      .select(
+        "id, title, start_at, end_at, calendar_id, object_id, location, provider_event_id"
+      )
       .eq("user_id", user_id)
       .gte("start_at", timeMin)
       .lt("start_at", timeMax),
@@ -63,8 +65,16 @@ export async function GET(req: NextRequest) {
   }
 
   const items = itemsRes.data ?? [];
-  const outsideEvents = outsideRes.data ?? [];
-
+  const outsideEvents = (outsideRes.data ?? []) as {
+    id: string;
+    title: string | null;
+    start_at: string;
+    end_at: string;
+    calendar_id: string | null;
+    object_id: string | null;
+    location: string | null;
+    provider_event_id: string; // <–– add this
+  }[];
   // 4) Map to common Block shape
   const itemBlocks = items
     .filter((i) => i.start_at) // guard against null start_at
@@ -76,7 +86,7 @@ export async function GET(req: NextRequest) {
       return {
         id: i.id,
         kind: "item" as const,
-        // NEW: tells frontend where this lives in DB
+        // tells frontend where this lives in DB
         source: "item" as const,
         sourceId: i.id,
 
@@ -104,6 +114,7 @@ export async function GET(req: NextRequest) {
       calendarId: e.calendar_id,
       objectId: e.object_id,
       location: e.location,
+      providerEventId: e.provider_event_id,
     }));
 
   // 5) Merge + sort by startAt

@@ -544,3 +544,17 @@ body {
   cursor: default;
   box-shadow: 0 4px 12px rgba(148, 163, 184, 0.3);
 }
+
+.today-event-delete-btn {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 1px 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.1);
+}
+.today-event-delete-btn:hover {
+  background: rgba(0, 0, 0, 0.2);
+}

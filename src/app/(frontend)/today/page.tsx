@@ -130,7 +130,7 @@ function layoutBlocks(blocks: CalendarBlock[]): PositionedBlock[] {
   });
 }
 
-// NEW: drag state type
+// drag state type
 type DragState = {
   id: CalendarBlock["id"];
   originalStart: Date;
@@ -165,8 +165,8 @@ export default function TodayPage() {
   // NEW: resize state
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
 
-  // NEW: suppress click after drag
-  const [justDragged, setJustDragged] = useState(false);
+  // NEW: track whether this interaction dragged/resized
+  const didDragRef = useRef(false);
 
   const now = new Date();
   const weekday = now.toLocaleDateString(undefined, { weekday: "long" });
@@ -300,9 +300,9 @@ export default function TodayPage() {
             className="today-timeline"
             ref={timelineRef}
             onClick={(e) => {
-              // NEW: ignore the first click right after a drag/resize
-              if (justDragged) {
-                setJustDragged(false);
+              // NEW: if this interaction involved a drag/resize, don't create a new event
+              if (didDragRef.current) {
+                didDragRef.current = false;
                 return;
               }
 
@@ -331,11 +331,12 @@ export default function TodayPage() {
             onMouseMove={(e) => {
               if (!timelineRef.current) return;
 
-              // NEW: if mouse button is not held, stop dragging/resizing
+              // 🔹 if no mouse button is held, stop drag/resize
               if (e.buttons === 0) {
                 if (dragState || resizeState) {
                   setDragState(null);
                   setResizeState(null);
+                  didDragRef.current = false;
                 }
                 return;
               }
@@ -347,6 +348,8 @@ export default function TodayPage() {
 
               // RESIZE has priority
               if (resizeState) {
+                didDragRef.current = true; // NEW: mark that a drag/resize occurred
+
                 let newEndMinutes = rawMinutes;
                 newEndMinutes = Math.max(
                   0,
@@ -377,6 +380,8 @@ export default function TodayPage() {
 
               // DRAG if active
               if (!dragState) return;
+
+              didDragRef.current = true; // NEW: mark that a drag/resize occurred
 
               // where the block's top should be, before snapping
               let newStartMinutes = rawMinutes - dragState.offsetMinutes;
@@ -416,39 +421,54 @@ export default function TodayPage() {
             onMouseUp={async () => {
               if (!dragState && !resizeState) return;
 
+              // figure out which block was moved/resized
               const movedId = dragState?.id ?? resizeState?.id;
               const movedBlock = blocks.find((b) => b.id === movedId);
 
               if (movedBlock && movedBlock.startAt && movedBlock.endAt) {
+                const startIso = movedBlock.startAt;
+                const endIso = movedBlock.endAt;
                 const durationMin =
-                  (new Date(movedBlock.endAt).getTime() -
-                    new Date(movedBlock.startAt).getTime()) /
+                  (new Date(endIso).getTime() -
+                    new Date(startIso).getTime()) /
                   60000;
+
+                const source =
+                  movedBlock.kind === "external" ? "outside" : "item";
 
                 try {
                   await fetch("/api/patchEventsAfterMoving", {
                     method: "PATCH",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      source: movedBlock.kind === "external" ? "outside" : "item",
-                      id: movedBlock.id,
-                      start_at: movedBlock.startAt,
-                      duration_min: durationMin,
-                    }),
+                    body:
+                      source === "item"
+                        ? JSON.stringify({
+                            source,
+                            id: movedBlock.id,
+                            start_at: startIso,
+                            duration_min: durationMin,
+                          })
+                        : JSON.stringify({
+                            source,
+                            id: movedBlock.id,
+                            start_at: startIso,
+                            end_at: endIso,
+                          }),
                   });
                 } catch (err) {
-                  console.error("Failed to persist item move/resize", err);
+                  console.error("Failed to persist block move/resize", err);
                 }
               }
 
               setDragState(null);
               setResizeState(null);
-              setJustDragged(true); // NEW: remember that we just dragged/resized
+              didDragRef.current = false; // NEW: reset flag at end of interaction
             }}
             onMouseLeave={() => {
               if (!dragState && !resizeState) return;
               setDragState(null);
               setResizeState(null);
+              didDragRef.current = false; // NEW: reset on leave
             }}
           >
             {nowLine !== null && (
@@ -511,6 +531,58 @@ export default function TodayPage() {
                     }}
                     onClick={(e) => e.stopPropagation()} // don't open modal when clicking an event
                   >
+                    {/*DELETE BUTTON*/}
+                    <button
+                      className="today-event-delete-btn"
+                      style={{
+                        position: "absolute",
+                        top: 2,
+                        right: 2,
+                        width: 16,
+                        height: 16,
+                        fontSize: 10,
+                        lineHeight: "12px",
+                      }}
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+
+                        const source =
+                          block.kind === "external" ? "outside" : "item";
+
+                        try {
+                          const res = await fetch("/api/deleteEvents", {
+                            method: "DELETE",
+                            headers: {
+                              "Content-Type": "application/json",
+                            },
+                            body: JSON.stringify({
+                              id: block.id,
+                              source,
+                              calendarId: block.calendarId,
+                              providerEventId: block.providerEventId ?? null,
+                            }),
+                          });
+
+                          if (!res.ok) {
+                            console.error(
+                              "Failed to delete event",
+                              await res.text()
+                            );
+                            return;
+                          }
+
+                          setBlocks((prev) =>
+                            prev.filter((b) => b.id !== block.id)
+                          );
+                        } catch (err) {
+                          console.error("Delete event error", err);
+                        }
+                      }}
+                    >
+                      ✕
+                    </button>
+
                     {/* DRAG BODY: top/middle */}
                     <div
                       className="today-event-drag-body"
@@ -863,4 +935,3 @@ function NewEventModal({ start, onClose, onCreated }: NewEventModalProps) {
     </div>
   );
 }
-
